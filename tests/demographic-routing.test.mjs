@@ -132,6 +132,14 @@ function createCaptionScenario(count = 1205) {
         savedProgress,
       });
     },
+    initialForEndedPublicStudy(now = new Date()) {
+      return studiesModule.fetchInitialActiveStudyCaptions(client, profileId, {
+        includeEndedPublicStudy: true,
+        includePrivateStudies: true,
+        now,
+        studyId: 1,
+      });
+    },
     next(captionIds, studyId = 1) {
       return actions.loadMoreCaptionVoteCaptions({ captionIds, includePrivateStudies: true, studyId });
     },
@@ -173,6 +181,24 @@ test("the full study is shuffled before batching, with every caption delivered o
   const reopened = await scenario.initial();
   assert.notDeepEqual(reopened.captionOrder, initial.captionOrder);
   assert.deepEqual([...reopened.captionOrder].sort(), [...initial.captionOrder].sort());
+});
+
+test("ended public studies load caption content outside the active date window", async () => {
+  const scenario = createCaptionScenario(3);
+  const now = new Date("2026-11-16T20:00:00.000Z");
+  scenario.mappings.forEach((mapping) => {
+    mapping.studies = studyRow(1, {
+      is_private: false,
+      start_datetime_utc: null,
+      end_datetime_utc: "2026-10-01T00:00:00.000Z",
+    });
+  });
+
+  const initial = await scenario.initialForEndedPublicStudy(now);
+  assert.equal(initial.error, null);
+  assert.equal(initial.captionOrder.length, 3);
+  assert.equal(initial.captions.length, 3);
+  assert.deepEqual(initial.captions.map((caption) => caption.id), initial.captionOrder);
 });
 
 test("resuming restores the saved caption order and fetches a batch centered at the checkpoint", async () => {
@@ -238,6 +264,69 @@ test("batch actions reject invalid requests and signed-out users before querying
   scenario.signOut();
   assert.equal((await scenario.next([captionId(1)])).success, false);
   assert.deepEqual(scenario.requests, []);
+});
+
+test("archived lazy caption loading requires an ended public study and active participation", async () => {
+  const pastStudy = {
+    id: 8,
+    is_private: false,
+    start_datetime_utc: null,
+    end_datetime_utc: new Date(Date.now() - 86_400_000).toISOString(),
+  };
+  const participation = { started_at: "2026-10-01T12:00:00Z", ended_at: null };
+  const fetchedScopes = [];
+  const buildActions = ({ study = pastStudy, userParticipation = participation } = {}) => {
+    const client = {
+      auth: { getUser: async () => ({ data: { user: { id: profileId } } }) },
+      from(table) {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => ({
+            data: table === "studies" ? study : userParticipation,
+            error: null,
+          }),
+        };
+        return query;
+      },
+    };
+    return loadModule("src/app/actions.ts", {
+      "@/lib/studies": {
+        fetchActiveStudyCaptionPage: async (_client, _profileId, scope) => {
+          fetchedScopes.push(scope);
+          return { captions: [], error: null };
+        },
+      },
+      "@/lib/study-caption-order": captionOrderModule,
+      "@/lib/supabase/server": { createClient: async () => client },
+      "@/lib/caption-images": { resolveStudyCaptionImageUrl: () => null },
+      "@/lib/caption-votes": loadModule("src/lib/caption-votes.ts"),
+      "@/lib/study-vote-history": {},
+    });
+  };
+
+  const request = {
+    captionIds: [captionId(1)],
+    includeEndedPublicStudy: true,
+    studyId: 8,
+  };
+  const allowed = await buildActions().loadMoreCaptionVoteCaptions(request);
+  assert.equal(allowed.success, true);
+  assert.equal(fetchedScopes[0].includeEndedPublicStudy, true);
+
+  const privateStudyActions = buildActions({
+    study: { ...pastStudy, is_private: true },
+  });
+  const deniedPrivate = await privateStudyActions.loadMoreCaptionVoteCaptions(request);
+  assert.equal(deniedPrivate.success, false);
+  assert.equal(fetchedScopes.length, 1);
+
+  const completedParticipationActions = buildActions({
+    userParticipation: { ...participation, ended_at: "2026-10-02T12:00:00Z" },
+  });
+  const deniedCompleted = await completedParticipationActions.loadMoreCaptionVoteCaptions(request);
+  assert.equal(deniedCompleted.success, false);
+  assert.equal(fetchedScopes.length, 1);
 });
 
 class Redirect extends Error {
@@ -391,9 +480,9 @@ test("the participant dashboard shows pending survey progress before opening stu
 test("the participant dashboard links to previous studies for reviewing captions and likes", async () => {
   const scenario = createScenario({ answered: [1, 2] });
   const html = renderToStaticMarkup(await scenario.home({}));
-  assert.match(html, /Browse previous studies/);
+  assert.match(html, /Previous studies/);
   assert.match(html, /href="\/previous-studies"/);
-  assert.match(html, /Browse ended studies and update your own likes/);
+  assert.match(html, /Take or resume unfinished studies, view results, and browse captions/);
 });
 
 test("past-study loaders restrict the archive to ended public studies and paginate captions", async () => {
@@ -458,6 +547,51 @@ test("past-study loaders restrict the archive to ended public studies and pagina
   assert.deepEqual(calls[1].filters, [["eq", "study_id", 8]]);
   assert.deepEqual(calls[1].range, [2, 3]);
   assert.deepEqual(calls[1].options, { count: "exact" });
+});
+
+test("previous studies shows take, resume, and results actions from participant progress", async () => {
+  const studies = [studyRow(1), studyRow(2), studyRow(3)];
+  const participations = [
+    { profile_id: profileId, study_id: 2, started_at: "2026-10-01T12:00:00Z", ended_at: null },
+    { profile_id: profileId, study_id: 3, started_at: "2026-10-01T12:00:00Z", ended_at: "2026-10-01T13:00:00Z" },
+  ];
+  const page = loadModule("src/app/previous-studies/page.tsx", {
+    "next/link": {
+      default: ({ children, ...props }) => createElement("a", props, children),
+    },
+    "next/navigation": { redirect: (path) => { throw new Redirect(path); } },
+    "@heroicons/react/24/outline": { ArrowLeftIcon: () => createElement("svg") },
+    "@/app/profile-actions": { signOut: async () => {} },
+    "@/components/AccountMenu": { AccountMenu: NullComponent },
+    "@/components/LocalDateTime": loadModule("src/components/LocalDateTime.tsx"),
+    "@/lib/studies": {
+      fetchPublicPastStudyIdentities: async () => ({ studies, error: null }),
+    },
+    "@/lib/study-participation": {
+      fetchStudyParticipations: async () => ({ participations, error: null }),
+      isStudyCompleted: participationModule.isStudyCompleted,
+    },
+    "@/lib/supabase/server": {
+      createClient: async () => ({
+        auth: { getUser: async () => ({ data: { user: { id: profileId, email: "participant@example.test" } } }) },
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { first_name: "Test", last_name: "Participant" },
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      }),
+    },
+  });
+  const html = renderToStaticMarkup(await page.default());
+  assert.match(html, /Study 1[\s\S]*Take study/);
+  assert.match(html, /Study 2[\s\S]*Resume study/);
+  assert.match(html, /Study 3[\s\S]*View results/);
+  assert.equal((html.match(/Browse captions/g) ?? []).length, 3);
 });
 
 test("signed-in users can update hearts on ended public study captions", async (t) => {
@@ -623,6 +757,77 @@ test("previous-study caption cards expose a participant's current like state and
   assert.doesNotMatch(browseOnlyHtml, /Like this caption|remove like/);
 });
 
+test("previous-study archive search and heart filters narrow captions on the current page", () => {
+  const { filterPreviousStudyCaptions, PreviousStudyCaptionList } = loadModule(
+    "src/components/PreviousStudyCaptionList.tsx",
+    {
+      "@/components/PreviousStudyCaptionCard": {
+        PreviousStudyCaptionCard: ({ caption, captionNumber }) =>
+          createElement("li", null, `${captionNumber}: ${caption.content} (${caption.isLiked ? "liked" : "not liked"})`),
+      },
+    }
+  );
+  const entries = [
+    {
+      caption: {
+        id: captionId(81),
+        content: "A joke about coffee",
+        imageSrc: null,
+        isLiked: true,
+        studyCaptionMappingId: 101,
+      },
+      captionNumber: 1,
+    },
+    {
+      caption: {
+        id: captionId(82),
+        content: "A joke about campus",
+        imageSrc: null,
+        isLiked: false,
+        studyCaptionMappingId: 102,
+      },
+      captionNumber: 2,
+    },
+    {
+      caption: {
+        id: captionId(83),
+        content: null,
+        imageSrc: null,
+        isLiked: false,
+        studyCaptionMappingId: 103,
+      },
+      captionNumber: 3,
+    },
+  ];
+
+  assert.deepEqual(
+    filterPreviousStudyCaptions(entries, " COFFEE ", "all").map(({ caption }) => caption.id),
+    [captionId(81)]
+  );
+  assert.deepEqual(
+    filterPreviousStudyCaptions(entries, "", "liked").map(({ caption }) => caption.id),
+    [captionId(81)]
+  );
+  assert.deepEqual(
+    filterPreviousStudyCaptions(entries, "", "not-liked").map(({ caption }) => caption.id),
+    [captionId(82), captionId(83)]
+  );
+  assert.deepEqual(
+    filterPreviousStudyCaptions(entries, "coffee", "not-liked"),
+    []
+  );
+
+  const html = renderToStaticMarkup(createElement(PreviousStudyCaptionList, {
+    captions: entries,
+    studyId: 8,
+  }));
+  assert.match(html, /Find a caption/);
+  assert.match(html, /Search caption text on this page/);
+  assert.match(html, /All captions/);
+  assert.match(html, /Not liked/);
+  assert.match(html, /Showing 3 of 3 captions on this page/);
+});
+
 test("participant progress cards stack status labels and use responsive columns", () => {
   const { ParticipantProgress } = loadModule("src/components/ParticipantProgress.tsx");
   const html = renderToStaticMarkup(ParticipantProgress({
@@ -667,16 +872,29 @@ test("profile completion heading retains theme-aware readable contrast", async (
   assert.doesNotMatch(html, /text-transparent animate-text-shimmer/);
 });
 
-test("unfinished direct study visits return to the progress dashboard while setup is pending", async () => {
+test("unfinished direct study visits preserve their destination through required setup", async () => {
   const scenario = createScenario({ studies: [studyRow(1)] });
   await assert.rejects(
     scenario.study({ params: Promise.resolve({ studyId: "1" }) }),
     (error) =>
       error instanceof Redirect &&
-      error.path.startsWith("/?") &&
+      error.path.startsWith("/demographics?") &&
       error.path.includes("next=%2Fstudy%2F1")
   );
   assert.deepEqual(scenario.captionLoads, []);
+
+  const notificationsPending = createScenario({
+    answered: [1, 2],
+    notificationPreferences: { notify_new_study_sms: null },
+    studies: [studyRow(1)],
+  });
+  await assert.rejects(
+    notificationsPending.study({ params: Promise.resolve({ studyId: "1" }) }),
+    (error) =>
+      error instanceof Redirect &&
+      error.path.startsWith("/notification-preferences?") &&
+      error.path.includes("next=%2Fstudy%2F1")
+  );
 });
 
 test("signed-out users still go to login", async () => {
@@ -922,7 +1140,7 @@ test("reopening a completed study shows saved stats without loading captions or 
   assert.deepEqual(scenario.captionLoads, []);
 });
 
-test("completed studies still show stats after expiration; unfinished studies stay expired", async () => {
+test("completed studies show saved stats after expiration and ended public studies can be taken", async () => {
   const studies = [studyRow(1, { end_datetime_utc: new Date(Date.now() - 86_400_000).toISOString() })];
   const completed = createScenario({ studies, participations: [
     { profile_id: profileId, study_id: 1, started_at: "2026-01-01T12:00:00Z", ended_at: "2026-01-01T13:00:00Z", completion_stats: completionStats },
@@ -931,8 +1149,23 @@ test("completed studies still show stats after expiration; unfinished studies st
   assert.match(html, /Study Stats/);
   assert.doesNotMatch(html, /expired|Start Study|End Study/);
   assert.deepEqual(completed.captionLoads, []);
-  const unfinished = createScenario({ studies });
-  assert.match(renderToStaticMarkup(await unfinished.study({ params: Promise.resolve({ studyId: "1" }) })), /this study is expired/);
+  const unfinished = createScenario({ studies, answered: [1, 2] });
+  const unfinishedHtml = renderToStaticMarkup(
+    await unfinished.study({ params: Promise.resolve({ studyId: "1" }) })
+  );
+  assert.doesNotMatch(unfinishedHtml, /this study is expired/);
+  assert.match(unfinishedHtml, /No captions available for this study/);
+  assert.equal(unfinished.captionLoads[0].includeEndedPublicStudy, true);
+
+  const future = createScenario({
+    answered: [1, 2],
+    studies: [studyRow(1, { start_datetime_utc: new Date(Date.now() + 86_400_000).toISOString() })],
+  });
+  assert.match(
+    renderToStaticMarkup(await future.study({ params: Promise.resolve({ studyId: "1" }) })),
+    /this study is expired/
+  );
+  assert.deepEqual(future.captionLoads, []);
 });
 
 test("stats validation rejects incomplete or invalid data and keeps real zero values", () => {
@@ -993,8 +1226,31 @@ test("study participation actions authenticate, validate, propagate failures, an
       auth: { getUser: async () => ({ data: { user: signedIn ? { id: profileId } : null } }) },
       rpc: (name, args) => {
         calls.push({ name, args });
-        return { single: async () => fail ? { data: null, error: { message: "offline" } } : { data: participation, error: null } };
+        return {
+          single: async () => fail
+            ? {
+                data: null,
+                error: fail === true ? { message: "offline" } : fail,
+              }
+            : { data: participation, error: null },
+        };
       },
+      from: (table) => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: table === "studies"
+                ? {
+                    is_private: false,
+                    start_datetime_utc: null,
+                    end_datetime_utc: new Date(Date.now() - 86_400_000).toISOString(),
+                  }
+                : null,
+              error: null,
+            }),
+          }),
+        }),
+      }),
     }) },
   });
   for (const id of [0, -1, 1.2, NaN, Infinity, "1"]) {
@@ -1020,11 +1276,15 @@ test("study participation actions authenticate, validate, propagate failures, an
   assert.equal((await actions.startStudy(1)).success, false);
   assert.equal((await actions.saveStudyProgress(1, progress)).success, false);
   assert.deepEqual(revalidated, []);
+  fail = { code: "42501", message: "row-level security policy violation" };
+  const archivedStart = await actions.startStudy(1);
+  assert.equal(archivedStart.success, false);
+  assert.match(archivedStart.error, /20261116150000_allow_ended_public_study_participation\.sql/);
   fail = false;
   assert.deepEqual(await actions.startStudy(1), { success: true, participation });
   assert.deepEqual(await actions.endStudy(1, completionStats), { success: true, participation });
   assert.deepEqual(await actions.saveStudyProgress(1, progress), { success: true, participation });
-  assert.deepEqual(calls.slice(2), [
+  assert.deepEqual(calls.slice(3), [
     { name: "start_study", args: { p_study_id: 1 } },
     { name: "end_study", args: { p_study_id: 1, p_completion_stats: completionStats } },
     { name: "save_study_progress", args: { p_study_id: 1, p_progress: progress } },

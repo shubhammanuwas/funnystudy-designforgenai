@@ -31,6 +31,37 @@ async function recordParticipation(
   const { data, error } = await supabase.rpc(action, args).single();
   if (error || !data) {
     console.error(`[${action}] record participation failed`, error);
+    if (action === "start_study" && error?.code === "42501") {
+      const { data: study, error: studyError } = await supabase
+        .from("studies")
+        .select("is_private, start_datetime_utc, end_datetime_utc")
+        .eq("id", studyId)
+        .maybeSingle();
+
+      if (studyError) {
+        console.error("[start_study] diagnose participation policy failure", studyError);
+      } else {
+        const now = Date.now();
+        const startsAt = study?.start_datetime_utc
+          ? new Date(study.start_datetime_utc).getTime()
+          : null;
+        const endsAt = study?.end_datetime_utc
+          ? new Date(study.end_datetime_utc).getTime()
+          : null;
+        if (
+          study?.is_private === false &&
+          endsAt !== null &&
+          endsAt < now &&
+          (startsAt === null || startsAt <= now)
+        ) {
+          return {
+            success: false,
+            error: "The database has not enabled participation in ended public studies yet. Apply migration 20261116150000_allow_ended_public_study_participation.sql, then try again.",
+          };
+        }
+      }
+    }
+
     return {
       success: false,
       error: action === "start_study"

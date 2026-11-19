@@ -61,6 +61,7 @@ export type NumericStudyLookupResult =
   | { error: PostgrestError; status: "error"; study: null };
 
 type StudyCaptionScope = {
+  includeEndedPublicStudy?: boolean;
   includePrivateStudies?: boolean;
   studyId?: number | null;
 };
@@ -71,6 +72,11 @@ function normalizeStudyId(studyId: number | null | undefined) {
     studyId > 0
     ? studyId
     : null;
+}
+
+function isEndedPublicStudyScope(scope: StudyCaptionScope) {
+  return scope.includeEndedPublicStudy === true &&
+    normalizeStudyId(scope.studyId) !== null;
 }
 
 function isStudyInActiveDateRange(study: StudyRow, now: Date) {
@@ -316,15 +322,22 @@ export async function fetchActiveStudyCaptionIds(
     let query = supabase
       .from("study_caption_mappings")
       .select("id, caption_id, studies!inner(id), captions!inner(id)")
-      .or(`start_datetime_utc.lte.${nowIso},start_datetime_utc.is.null`, {
-        referencedTable: "studies",
-      })
-      .or(`end_datetime_utc.gte.${nowIso},end_datetime_utc.is.null`, {
-        referencedTable: "studies",
-      })
       .order("id", { ascending: true });
 
-    if (!scope.includePrivateStudies) {
+    const endedPublicStudyScope = isEndedPublicStudyScope(scope);
+    if (endedPublicStudyScope) {
+      query = query.eq("studies.is_private", false);
+    } else {
+      query = query
+        .or(`start_datetime_utc.lte.${nowIso},start_datetime_utc.is.null`, {
+          referencedTable: "studies",
+        })
+        .or(`end_datetime_utc.gte.${nowIso},end_datetime_utc.is.null`, {
+          referencedTable: "studies",
+        });
+    }
+
+    if (!endedPublicStudyScope && !scope.includePrivateStudies) {
       query = query.eq("studies.is_private", false);
     }
 
@@ -375,15 +388,22 @@ export async function fetchActiveStudyCaptions(
       .select(
         "id, caption_id, studies!inner(id), captions!inner(id, content, created_datetime_utc, image_id, like_count, images(url))"
       )
-      .or(`start_datetime_utc.lte.${nowIso},start_datetime_utc.is.null`, {
-        referencedTable: "studies",
-      })
-      .or(`end_datetime_utc.gte.${nowIso},end_datetime_utc.is.null`, {
-        referencedTable: "studies",
-      })
       .order("id", { ascending: true });
 
-    if (!scope.includePrivateStudies) {
+    const endedPublicStudyScope = isEndedPublicStudyScope(scope);
+    if (endedPublicStudyScope) {
+      query = query.eq("studies.is_private", false);
+    } else {
+      query = query
+        .or(`start_datetime_utc.lte.${nowIso},start_datetime_utc.is.null`, {
+          referencedTable: "studies",
+        })
+        .or(`end_datetime_utc.gte.${nowIso},end_datetime_utc.is.null`, {
+          referencedTable: "studies",
+        });
+    }
+
+    if (!endedPublicStudyScope && !scope.includePrivateStudies) {
       query = query.eq("studies.is_private", false);
     }
 
@@ -428,9 +448,11 @@ export async function fetchActiveStudyCaptionPage(
   {
     now = new Date(),
     captionIds,
+    includeEndedPublicStudy = false,
     includePrivateStudies = false,
     studyId = null,
   }: {
+    includeEndedPublicStudy?: boolean;
     includePrivateStudies?: boolean;
     now?: Date;
     captionIds: readonly string[];
@@ -455,16 +477,26 @@ export async function fetchActiveStudyCaptionPage(
         "id, caption_id, studies!inner(id), captions!inner(id, content, created_datetime_utc, image_id, like_count, images(url))"
       )
       .in("caption_id", captionIds)
-      .or(`start_datetime_utc.lte.${nowIso},start_datetime_utc.is.null`, {
-        referencedTable: "studies",
-      })
-      .or(`end_datetime_utc.gte.${nowIso},end_datetime_utc.is.null`, {
-        referencedTable: "studies",
-      })
       .order("caption_id", { ascending: true })
       .order("id", { ascending: true });
 
-    if (!includePrivateStudies) {
+    const endedPublicStudyScope = isEndedPublicStudyScope({
+      includeEndedPublicStudy,
+      studyId: normalizedStudyId,
+    });
+    if (endedPublicStudyScope) {
+      query = query.eq("studies.is_private", false);
+    } else {
+      query = query
+        .or(`start_datetime_utc.lte.${nowIso},start_datetime_utc.is.null`, {
+          referencedTable: "studies",
+        })
+        .or(`end_datetime_utc.gte.${nowIso},end_datetime_utc.is.null`, {
+          referencedTable: "studies",
+        });
+    }
+
+    if (!endedPublicStudyScope && !includePrivateStudies) {
       query = query.eq("studies.is_private", false);
     }
 
@@ -541,12 +573,14 @@ export async function fetchInitialActiveStudyCaptions(
   supabase: SupabaseClient,
   profileId: string,
   {
+    includeEndedPublicStudy = false,
     includePrivateStudies = false,
     minimumCount = INITIAL_ACTIVE_STUDY_CAPTION_COUNT,
     now = new Date(),
     savedProgress,
     studyId = null,
   }: {
+    includeEndedPublicStudy?: boolean;
     includePrivateStudies?: boolean;
     minimumCount?: number;
     now?: Date;
@@ -565,6 +599,7 @@ export async function fetchInitialActiveStudyCaptions(
       ? minimumCount
       : INITIAL_ACTIVE_STUDY_CAPTION_COUNT;
   const { ids, error } = await fetchActiveStudyCaptionIds(supabase, now, {
+    includeEndedPublicStudy,
     includePrivateStudies,
     studyId,
   });
@@ -598,6 +633,7 @@ export async function fetchInitialActiveStudyCaptions(
     );
     const page = await fetchActiveStudyCaptionPage(supabase, profileId, {
       captionIds: batchIds,
+      includeEndedPublicStudy,
       includePrivateStudies,
       now,
       studyId,

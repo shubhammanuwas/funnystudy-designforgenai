@@ -19,12 +19,14 @@ insert into public.studies (id, is_private, start_datetime_utc, end_datetime_utc
 overriding system value values
   (-91001, true, null, null),
   (-91002, false, null, now() - interval '1 day'),
-  (-91003, false, now() + interval '1 day', null);
+  (-91003, false, now() + interval '1 day', null),
+  (-91004, true, null, now() - interval '1 day');
 
 set local role authenticated;
 do $$
 declare first_start public.study_participations; retry public.study_participations;
-  first_end public.study_participations; affected integer;
+  first_end public.study_participations; ended_public_start public.study_participations;
+  affected integer;
   stats jsonb := '{"likedCount":1,"viewedCount":3,"medianVoteTimeMs":1200,"medianNavigationTimeMs":2000}';
   progress jsonb := '{"captionOrder":["00000000-0000-4000-8000-000000000001","00000000-0000-4000-8000-000000000002"],"currentCaptionIndex":1,"sessionStats":{"likedCaptionTimeMsByKey":{},"navigationTimeMsByKey":{},"viewedCaptionKeys":{}}}';
 begin
@@ -56,14 +58,18 @@ begin
   exception when invalid_parameter_value then null;
   end;
 
-  begin
-    perform public.start_study(-91002);
-    raise exception 'Expired start unexpectedly allowed';
-  exception when insufficient_privilege then null;
-  end;
+  ended_public_start := public.start_study(-91002);
+  if ended_public_start.started_at is null or ended_public_start.ended_at is not null then
+    raise exception 'Ended public study could not be started';
+  end if;
   begin
     perform public.start_study(-91003);
     raise exception 'Upcoming start unexpectedly allowed';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.start_study(-91004);
+    raise exception 'Ended private study unexpectedly allowed';
   exception when insufficient_privilege then null;
   end;
   begin

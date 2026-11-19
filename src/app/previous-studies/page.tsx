@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -10,6 +10,11 @@ import {
   type StudyRow,
 } from "@/lib/studies";
 import { createClient } from "@/lib/supabase/server";
+import {
+  fetchStudyParticipations,
+  isStudyCompleted,
+  type StudyParticipation,
+} from "@/lib/study-participation";
 
 export default async function PreviousStudiesPage() {
   const supabase = await createClient();
@@ -26,6 +31,18 @@ export default async function PreviousStudiesPage() {
     console.error("[PreviousStudiesPage] load previous studies failed", error);
     throw new Error("Could not load previous studies");
   }
+  const { participations, error: participationError } = await fetchStudyParticipations(
+    supabase,
+    user.id,
+    studies.map((study) => study.id)
+  );
+  if (participationError) {
+    console.error("[PreviousStudiesPage] load study progress failed", participationError);
+    throw new Error("Could not load study progress");
+  }
+  const participationByStudyId = new Map(
+    participations.map((participation) => [participation.study_id, participation])
+  );
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -50,9 +67,9 @@ export default async function PreviousStudiesPage() {
         <header className="mb-6 space-y-2 sm:mb-8">
           <h1 className="text-3xl font-bold sm:text-4xl">Previous studies</h1>
           <p className="text-sm text-[var(--muted)] sm:text-base">
-            Browse ended public studies and add or remove heart responses,
-            including on captions you skipped. Saved completion stats remain
-            unchanged.
+            Take or resume any unfinished ended public study, view saved results,
+            or browse captions and update your own heart responses. Saved
+            completion stats remain unchanged.
           </p>
         </header>
 
@@ -67,7 +84,10 @@ export default async function PreviousStudiesPage() {
           <ul className="space-y-3">
             {studies.map((study) => (
               <li key={study.id}>
-                <PastStudyCard study={study} />
+                <PastStudyCard
+                  study={study}
+                  participation={participationByStudyId.get(study.id) ?? null}
+                />
               </li>
             ))}
           </ul>
@@ -82,25 +102,49 @@ export default async function PreviousStudiesPage() {
   );
 }
 
-function PastStudyCard({ study }: { study: StudyRow }) {
+function PastStudyCard({
+  participation,
+  study,
+}: {
+  participation: StudyParticipation | null;
+  study: StudyRow;
+}) {
+  const isCompleted = isStudyCompleted(participation);
+  const hasStarted = Boolean(participation?.started_at);
+  const studyActionLabel = isCompleted
+    ? "View results"
+    : hasStarted
+      ? "Resume study"
+      : "Take study";
+
   return (
-    <Link
-      href={`/previous-studies/${study.id}`}
-      className="glass-panel flex items-center justify-between gap-4 rounded-2xl p-5 transition hover:border-[var(--accent)] hover:bg-[var(--surface-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-strong)] sm:p-6"
-    >
-      <span className="min-w-0 space-y-2">
-        <span className="block text-lg font-semibold sm:text-xl">
-          Study {study.id}
-        </span>
-        <span className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 text-sm leading-6 text-[var(--muted)]">
-          <span>Ended</span>
-          <span>{study.end_datetime_utc ? <LocalDateTime value={study.end_datetime_utc} /> : "Unknown"}</span>
-        </span>
-        <span className="block text-sm font-semibold text-[var(--accent-strong)]">
+    <article className="glass-panel rounded-2xl p-5 sm:p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-2">
+          <h2 className="text-lg font-semibold sm:text-xl">Study {study.id}</h2>
+          <p className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 text-sm leading-6 text-[var(--muted)]">
+            <span>Ended</span>
+            <span>{study.end_datetime_utc ? <LocalDateTime value={study.end_datetime_utc} /> : "Unknown"}</span>
+          </p>
+          <p className="text-sm text-[var(--muted)]">
+            {isCompleted ? "Completed" : hasStarted ? "In progress" : "Not started"}
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Link
+          href={`/study/${study.id}`}
+          className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-contrast)] transition hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-strong)]"
+        >
+          {studyActionLabel}
+        </Link>
+        <Link
+          href={`/previous-studies/${study.id}`}
+          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--panel-border)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--surface-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-strong)]"
+        >
           Browse captions
-        </span>
-      </span>
-      <ArrowRightIcon aria-hidden className="h-5 w-5 shrink-0 text-[var(--accent-strong)]" />
-    </Link>
+        </Link>
+      </div>
+    </article>
   );
 }

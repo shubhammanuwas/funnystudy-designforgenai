@@ -176,10 +176,12 @@ export async function setPreviousStudyCaptionLike({
 
 export async function loadMoreCaptionVoteCaptions({
   captionIds,
+  includeEndedPublicStudy,
   includePrivateStudies,
   studyId,
 }: {
   captionIds: string[];
+  includeEndedPublicStudy?: boolean;
   includePrivateStudies?: boolean;
   studyId?: number | null;
 }): Promise<LoadMoreCaptionsResult> {
@@ -208,11 +210,59 @@ export async function loadMoreCaptionVoteCaptions({
     return { success: false, error: "Not signed in" };
   }
 
+  if (includeEndedPublicStudy) {
+    const [{ data: study, error: studyError }, { data: participation, error: participationError }] =
+      await Promise.all([
+        supabase
+          .from("studies")
+          .select("id, is_private, start_datetime_utc, end_datetime_utc")
+          .eq("id", normalizedStudyId)
+          .maybeSingle(),
+        supabase
+          .from("study_participations")
+          .select("started_at, ended_at")
+          .eq("profile_id", user.id)
+          .eq("study_id", normalizedStudyId)
+          .maybeSingle(),
+      ]);
+
+    if (studyError || participationError) {
+      console.error("[loadMoreCaptionVoteCaptions] validate archived study failed", {
+        participationError,
+        studyError,
+      });
+      return {
+        success: false,
+        error: "Could not verify this study. Please refresh and try again.",
+      };
+    }
+
+    const nowTime = Date.now();
+    const startedTime = study?.start_datetime_utc
+      ? new Date(study.start_datetime_utc).getTime()
+      : null;
+    const endedTime = study?.end_datetime_utc
+      ? new Date(study.end_datetime_utc).getTime()
+      : null;
+    if (
+      !study ||
+      study.is_private !== false ||
+      endedTime === null ||
+      endedTime >= nowTime ||
+      (startedTime !== null && startedTime > nowTime) ||
+      !participation?.started_at ||
+      participation.ended_at !== null
+    ) {
+      return { success: false, error: "This study is not available to continue." };
+    }
+  }
+
   const { captions, error } = await fetchActiveStudyCaptionPage(
     supabase,
     user.id,
     {
       captionIds,
+      includeEndedPublicStudy: Boolean(includeEndedPublicStudy),
       includePrivateStudies: Boolean(includePrivateStudies),
       studyId: normalizedStudyId,
     }

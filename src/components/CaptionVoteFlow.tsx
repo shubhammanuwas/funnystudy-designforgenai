@@ -374,6 +374,7 @@ function shouldIgnoreTouchNavigationTarget(target: EventTarget | null) {
 export function CaptionVoteFlow({
   captionOrder,
   captions,
+  includeEndedPublicStudy,
   includePrivateStudies,
   initialNextOffset,
   initialOffset,
@@ -386,6 +387,7 @@ export function CaptionVoteFlow({
 }: {
   captionOrder: string[];
   captions: CaptionForVote[];
+  includeEndedPublicStudy?: boolean;
   includePrivateStudies?: boolean;
   initialNextOffset: number | null;
   initialOffset: number;
@@ -924,6 +926,7 @@ export function CaptionVoteFlow({
         const captionIds = captionOrder.slice(offset, offset + STUDY_CAPTION_BATCH_SIZE);
         const result = await loadMoreCaptionVoteCaptions({
           captionIds,
+          includeEndedPublicStudy,
           includePrivateStudies,
           studyId,
         });
@@ -947,7 +950,7 @@ export function CaptionVoteFlow({
         setIsLoadingMoreCaptions(false);
       }
     },
-    [appendCaptionBatch, captionOrder, includePrivateStudies, isLoadingMoreCaptions, studyId]
+    [appendCaptionBatch, captionOrder, includeEndedPublicStudy, includePrivateStudies, isLoadingMoreCaptions, studyId]
   );
 
   const loadPreviousCaptions = useCallback(async () => {
@@ -965,6 +968,7 @@ export function CaptionVoteFlow({
       const captionIds = captionOrder.slice(previousOffset, queueStartOffset);
       const result = await loadMoreCaptionVoteCaptions({
         captionIds,
+        includeEndedPublicStudy,
         includePrivateStudies,
         studyId,
       });
@@ -998,6 +1002,7 @@ export function CaptionVoteFlow({
     }
   }, [
     captionOrder,
+    includeEndedPublicStudy,
     includePrivateStudies,
     isLoadingMoreCaptions,
     queue,

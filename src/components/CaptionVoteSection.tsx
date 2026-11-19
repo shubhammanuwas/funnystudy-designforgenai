@@ -14,6 +14,7 @@ import { parseStudyProgress } from "@/lib/study-progress";
 export function CaptionVoteSection({
   captionOrder,
   captions,
+  includeEndedPublicStudy,
   includePrivateStudies,
   initialNextOffset,
   initialOffset = 0,
@@ -26,6 +27,7 @@ export function CaptionVoteSection({
 }: {
   captionOrder: string[];
   captions: CaptionForVote[];
+  includeEndedPublicStudy?: boolean;
   includePrivateStudies?: boolean;
   initialNextOffset: number | null;
   initialOffset: number;
@@ -118,6 +120,7 @@ export function CaptionVoteSection({
           <CaptionVoteFlow
             captionOrder={entry.captionOrder}
             captions={entry.captions}
+            includeEndedPublicStudy={includeEndedPublicStudy}
             includePrivateStudies={includePrivateStudies}
             initialNextOffset={entry.initialNextOffset}
             initialOffset={entry.initialOffset}

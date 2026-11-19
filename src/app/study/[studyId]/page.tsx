@@ -11,10 +11,13 @@ import { CompleteProfileForm } from "@/components/CompleteProfileForm";
 import { PrivateStudyDisclaimer } from "@/components/PrivateStudyDisclaimer";
 import { StudyEasterEgg } from "@/components/StudyEasterEgg";
 import { resolveStudyCaptionImageUrl } from "@/lib/caption-images";
-import { fetchDemographicSurveyState } from "@/lib/demographics";
+import {
+  buildDemographicsPath,
+  fetchDemographicSurveyState,
+} from "@/lib/demographics";
 import { DEMOGRAPHIC_SKIPS_COOKIE, readDemographicSkips } from "@/lib/demographic-skips";
 import {
-  buildParticipantProgressPath,
+  buildNotificationPreferencesPath,
   fetchNotificationPreferences,
   NOTIFICATION_SKIPS_COOKIE,
   readNotificationSkips,
@@ -94,7 +97,25 @@ export default async function NumericStudyPage({
     console.error("[NumericStudyPage] load participation failed", participationError);
   }
 
-  if (studyResult.status === "expired" && !isStudyCompleted(participation) && !participationError) {
+  const studyEndTime = studyResult.study.end_datetime_utc
+    ? new Date(studyResult.study.end_datetime_utc).getTime()
+    : null;
+  const studyStartTime = studyResult.study.start_datetime_utc
+    ? new Date(studyResult.study.start_datetime_utc).getTime()
+    : null;
+  const canTakeEndedPublicStudy =
+    studyResult.status === "expired" &&
+    studyResult.study.is_private === false &&
+    studyEndTime !== null &&
+    studyEndTime < studyNow.getTime() &&
+    (studyStartTime === null || studyStartTime <= studyNow.getTime());
+
+  if (
+    studyResult.status === "expired" &&
+    !isStudyCompleted(participation) &&
+    !canTakeEndedPublicStudy &&
+    !participationError
+  ) {
     return <ExpiredStudyPage isPrivate={studyResult.study.is_private === true} />;
   }
 
@@ -112,7 +133,7 @@ export default async function NumericStudyPage({
         initialFirst={profile?.first_name ?? ""}
         initialLast={profile?.last_name ?? ""}
         message={message}
-        nextPath={buildParticipantProgressPath(currentPath)}
+        nextPath={currentPath}
         userEmail={user.email}
       />
     );
@@ -130,7 +151,7 @@ export default async function NumericStudyPage({
       skippedNotifications
     );
     if (notificationState.pending.length) {
-      redirect(buildParticipantProgressPath(currentPath));
+      redirect(buildNotificationPreferencesPath(currentPath));
     }
 
     const skippedQuestionIds = readDemographicSkips(
@@ -143,7 +164,7 @@ export default async function NumericStudyPage({
       skippedQuestionIds
     );
     if (demographicState.pendingQuestions.length) {
-      redirect(buildParticipantProgressPath(currentPath));
+      redirect(buildDemographicsPath({ next: currentPath, skippedQuestionIds }));
     }
   }
 
@@ -162,6 +183,7 @@ export default async function NumericStudyPage({
   } = skipCaptions
     ? { captionOrder: [], captions: [], error: null, initialOffset: 0, nextOffset: null }
     : await fetchInitialActiveStudyCaptions(supabase, user.id, {
+        includeEndedPublicStudy: canTakeEndedPublicStudy,
         includePrivateStudies: true,
         now: studyNow,
         savedProgress: participation?.progress,
@@ -196,6 +218,7 @@ export default async function NumericStudyPage({
           key={`${user.id}:${studyResult.study.id}`}
           captionOrder={captionOrder}
           captions={captionsForVote}
+          includeEndedPublicStudy={canTakeEndedPublicStudy}
           initialOffset={initialOffset}
           includePrivateStudies
           initialNextOffset={nextOffset}

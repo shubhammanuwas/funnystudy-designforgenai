@@ -19,11 +19,13 @@ export function PreviousStudyCaptionCard({
   caption,
   captionNumber,
   canEditVotes,
+  onLikeChange,
   studyId,
 }: {
   caption: PreviousStudyCaption;
   captionNumber: number;
   canEditVotes: boolean;
+  onLikeChange?: (isLiked: boolean) => void;
   studyId: number;
 }) {
   const [isLiked, setIsLiked] = useState(caption.isLiked);
@@ -49,6 +51,7 @@ export function PreviousStudyCaptionCard({
       }
 
       setIsLiked(nextIsLiked);
+      onLikeChange?.(nextIsLiked);
     } catch (err) {
       console.error("[PreviousStudyCaptionCard] update vote failed", err);
       setError("We couldn't update your like. Please try again.");

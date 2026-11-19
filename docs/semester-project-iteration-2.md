@@ -27,7 +27,9 @@ The current working version adds two explicit participant controls:
 
 These controls are a user-focused usability refinement, not a confirmed response from the PM. They preserve the existing study data and completion flow.
 
-The previous-study archive lets any signed-in user update their own heart response on an ended public study. They can remove an earlier like, restore it, or add a like to a caption they had skipped; a study participation record is not required. New archived likes are stored as study votes; timing is left unmeasured, and an already-saved completion stats snapshot remains unchanged.
+The previous-study archive lets any signed-in user search caption text on the current page, filter to liked or not-yet-liked captions, and update their own heart response on an ended public study. They can remove an earlier like, restore it, or add a like to a caption they had skipped; a study participation record is not required. New archived likes are stored as study votes; timing is left unmeasured, and an already-saved completion stats snapshot remains unchanged.
+
+The archive also lets participants take any unfinished ended public study they have not completed, resume saved progress, or reopen immutable results for completed studies. The study is scoped to its exact public study ID, and the database policy continues to reject new participation in ended private or upcoming studies.
 
 The codebase already contains vote-value types and mappings for several older rating choices, including negative values; their presence in the schema does not establish why the study UI removed those controls or whether they should return. The active study UI currently saves the heart action as `funny`; moving to another caption is not a dislike vote.
 
@@ -60,6 +62,7 @@ There are plausible reasons both to omit and to include a dislike option. They n
 - Participants can use an explicit **Next caption** action or existing gestures and keyboard controls; moving on does not save a negative vote.
 - Participants can use **Pause and return** to save their current position and return to the dashboard. The pause only navigates away after the checkpoint save succeeds.
 - Signed-in users can update their own heart responses in any ended public study, including adding a like to a caption they skipped. Vote editing does not rewrite a saved Study Stats snapshot.
+- Previous studies offer **Take study**, **Resume study**, and **View results** actions based on the signed-in participant's saved progress. Ended public studies can be started or resumed after applying the new participation-policy migration; completed studies remain one-time and show their existing saved stats.
 - The underlying vote behavior is unchanged: heart likes remain positive votes, and navigation without a like does not submit a dislike.
 - `npm run test:demographics`: 41 passed.
 - `npm run test:images`: 6 passed.

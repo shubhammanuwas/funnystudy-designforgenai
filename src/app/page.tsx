@@ -174,7 +174,8 @@ export default async function Home({
             <div className="glass-panel rounded-2xl p-6 text-center sm:p-8">
               <h1 className="text-2xl font-bold sm:text-3xl">No active studies</h1>
               <p className="mt-2 text-sm text-[var(--muted)]">
-                You can still browse captions from previous public studies.
+                You can take or resume unfinished public studies, view results,
+                or browse captions.
               </p>
             </div>
             <PastStudiesLink />
@@ -404,9 +405,9 @@ function PastStudiesLink() {
       className="glass-panel flex items-center justify-between gap-4 rounded-2xl p-5 transition hover:border-[var(--accent)] hover:bg-[var(--surface-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-strong)] sm:p-6"
     >
       <span className="min-w-0">
-        <span className="block font-semibold">Browse previous studies</span>
+        <span className="block font-semibold">Previous studies</span>
         <span className="mt-1 block text-sm text-[var(--muted)]">
-          Browse ended studies and update your own likes.
+          Take or resume unfinished studies, view results, and browse captions.
         </span>
       </span>
       <ArrowRightIcon aria-hidden className="h-5 w-5 shrink-0 text-[var(--accent-strong)]" />

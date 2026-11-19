@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { signOut } from "@/app/profile-actions";
 import { AccountMenu } from "@/components/AccountMenu";
-import { PreviousStudyCaptionCard } from "@/components/PreviousStudyCaptionCard";
+import { PreviousStudyCaptionList } from "@/components/PreviousStudyCaptionList";
 import {
   fetchPublicPastStudyCaptionPage,
   resolveNumericStudy,
@@ -156,9 +156,9 @@ export default async function PreviousStudyCaptionsPage({
             {count} caption{count === 1 ? "" : "s"} from this ended public study
           </p>
           <p className="text-sm leading-6 text-[var(--muted)]">
-            You can add or remove a heart on any caption from this ended
-            public study, including captions you skipped. Previously saved
-            Study Stats remain unchanged.
+            Search captions on this page, filter by heart status, and add or
+            remove your heart on any caption. Previously saved Study Stats
+            remain unchanged.
           </p>
         </header>
 
@@ -171,8 +171,9 @@ export default async function PreviousStudyCaptionsPage({
             <p className="mb-4 text-sm text-[var(--muted)]">
               Showing {start}–{end} of {count}
             </p>
-            <ul className="space-y-5">
-              {captions.map((caption, index) => {
+            <PreviousStudyCaptionList
+              key={`${study.id}-${requestedPage}`}
+              captions={captions.map((caption, index) => {
                 const imageUrl = resolveStudyCaptionImageUrl(caption);
                 const latestVote =
                   caption.study_caption_mapping_id === null
@@ -180,25 +181,21 @@ export default async function PreviousStudyCaptionsPage({
                     : latestVoteByMapping.get(
                         caption.study_caption_mapping_id
                       ) ?? null;
-                return (
-                  <PreviousStudyCaptionCard
-                    key={`${caption.id}-${caption.study_caption_mapping_id}`}
-                    caption={{
-                      content: caption.content,
-                      id: caption.id,
-                      imageSrc: imageUrl,
+                return {
+                  caption: {
+                        content: caption.content,
+                        id: caption.id,
+                        imageSrc: imageUrl,
                       isLiked:
                         latestVote === "funny" || latestVote === "very funny",
                       studyCaptionMappingId:
                         caption.study_caption_mapping_id,
-                    }}
-                    captionNumber={start + index}
-                    canEditVotes={caption.study_caption_mapping_id !== null}
-                    studyId={study.id}
-                  />
-                );
+                  },
+                  captionNumber: start + index,
+                };
               })}
-            </ul>
+              studyId={study.id}
+            />
             {pageCount > 1 ? (
               <nav
                 aria-label="Archive caption pages"
